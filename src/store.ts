@@ -89,6 +89,7 @@ const customRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const openAIWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const taskExecutions = new Map<string, symbol>()
 const agentRoundControllers = new Map<string, AbortController>()
+const imageConversationSubmissions = new Set<string>()
 const agentRecoveryContinuations = new Set<string>()
 const deletedActiveAgentTasks = new Map<string, { task: TaskRecord; controller: AbortController }>()
 let agentConversationPersistenceReady = false
@@ -3771,7 +3772,7 @@ async function submitImageConversation(options: { conversationId?: string; sourc
   const conversation = options.conversationId
     ? state.agentConversations.find((item) => item.id === options.conversationId)
     : getActiveAgentConversation()
-  if (!conversation || conversation.rounds.some((round) => round.status === 'running')) return
+  if (!conversation || imageConversationSubmissions.has(conversation.id) || conversation.rounds.some((round) => round.status === 'running')) return
   const editing = options.sourceRound ?? conversation.rounds.find((round) => round.id === state.agentEditingRoundId)
   const prompt = (options.sourceRound?.prompt ?? state.prompt).trim()
   if (!prompt) return
@@ -3782,8 +3783,11 @@ async function submitImageConversation(options: { conversationId?: string; sourc
   const previousOutputs = previousRound?.outputTaskIds.flatMap((id) => state.tasks.find((task) => task.id === id)?.outputImages ?? []) ?? []
   let imageIds = options.sourceRound?.inputImageIds ?? state.inputImages.map((image) => image.id)
   if (!imageIds.length && !options.sourceRound) imageIds = uniqueIds(previousOutputs).slice(0, MAX_INPUT_IMAGES)
-  let maskTargetImageId = options.sourceRound?.maskTargetImageId ?? state.maskDraft?.targetImageId ?? null
+  const maskTargetImageId = options.sourceRound
+    ? options.sourceRound.maskTargetImageId ?? null
+    : state.maskDraft?.targetImageId ?? null
   let maskImageId = options.sourceRound?.maskImageId ?? null
+  imageConversationSubmissions.add(conversation.id)
   try {
     if (!options.sourceRound && state.maskDraft) {
       const ordered = orderInputImagesForMask(state.inputImages, state.maskDraft.targetImageId)
@@ -3851,10 +3855,12 @@ async function submitImageConversation(options: { conversationId?: string; sourc
       ],
     }))
     state.setTasks([task, ...useStore.getState().tasks])
-    state.setPrompt('')
-    state.clearInputImages()
-    state.clearMaskDraft()
-    state.setAgentEditingRoundId(null)
+    if (!options.sourceRound) {
+      state.setPrompt('')
+      state.clearInputImages()
+      state.clearMaskDraft()
+      state.setAgentEditingRoundId(null)
+    }
     const controller = new AbortController()
     const key = getAgentRoundControllerKey(conversation.id, roundId)
     agentRoundControllers.set(key, controller)
@@ -3877,6 +3883,8 @@ async function submitImageConversation(options: { conversationId?: string; sourc
   } catch (err) {
     console.error('图片会话提交失败', err)
     state.showToast(err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    imageConversationSubmissions.delete(conversation.id)
   }
 }
 

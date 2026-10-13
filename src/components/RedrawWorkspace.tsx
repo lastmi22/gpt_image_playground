@@ -17,7 +17,7 @@ function SourceThumb({ item }: { item: RedrawItem }) {
     setSrc(url)
     return () => URL.revokeObjectURL(url)
   }, [item.file])
-  return <img src={src} alt={item.name} className="h-full w-full object-contain" />
+  return <img src={src || undefined} alt={item.name} className="h-full w-full object-contain" />
 }
 
 function ResultThumb({ imageId }: { imageId: string }) {
@@ -27,7 +27,7 @@ function ResultThumb({ imageId }: { imageId: string }) {
     void ensureImageCached(imageId).then((url) => { if (active) setSrc(url || '') })
     return () => { active = false }
   }, [imageId])
-  return <img src={src} alt="重绘结果" className="h-full w-full object-contain" />
+  return <img src={src || undefined} alt="重绘结果" className="h-full w-full object-contain" />
 }
 
 export default function RedrawWorkspace() {

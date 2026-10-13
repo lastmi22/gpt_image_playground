@@ -211,6 +211,58 @@ describe('Images conversation', () => {
     expect(useStore.getState().tasks).toHaveLength(2)
   })
 
+  it('regenerates the original input without consuming an unrelated composer draft or mask', async () => {
+    await putImage({ ...imageA, source: 'upload', createdAt: 1 })
+    vi.mocked(callImageApi).mockResolvedValue({ images: ['data:image/png;base64,output'] })
+    useStore.setState({ prompt: '重绘原图', inputImages: [imageA] })
+    await submitAgentMessage()
+    await vi.waitFor(() => expect(useStore.getState().agentConversations[0].rounds[0].status).toBe('done'))
+    const originalRound = useStore.getState().agentConversations[0].rounds[0]
+    const maskDraft = { targetImageId: imageB.id, maskDataUrl: 'data:image/png;base64,draft-mask', updatedAt: 2 }
+    useStore.setState({
+      prompt: '未提交的草稿',
+      inputImages: [imageB],
+      maskDraft,
+      agentEditingRoundId: originalRound.id,
+    })
+
+    await regenerateAgentAssistantMessage('conversation-a', originalRound.id)
+
+    await vi.waitFor(() => expect(useStore.getState().agentConversations[0].rounds[1].status).toBe('done'))
+    expect(callImageApi).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(callImageApi).mock.calls[1][0]).toMatchObject({
+      prompt: '重绘原图',
+      inputImageDataUrls: [imageA.dataUrl],
+      maskDataUrl: undefined,
+    })
+    expect(useStore.getState().agentConversations[0].rounds[1]).toMatchObject({
+      parentRoundId: null,
+      inputImageIds: [imageA.id],
+      maskTargetImageId: null,
+      maskImageId: null,
+    })
+    expect(useStore.getState()).toMatchObject({
+      prompt: '未提交的草稿',
+      inputImages: [imageB],
+      maskDraft,
+      agentEditingRoundId: originalRound.id,
+    })
+  })
+
+  it('creates only one round when submitting again before task persistence completes', async () => {
+    const request = deferred<Awaited<ReturnType<typeof callImageApi>>>()
+    vi.mocked(callImageApi).mockImplementationOnce(() => request.promise)
+    useStore.getState().setPrompt('生成图片')
+
+    await Promise.all([submitAgentMessage(), submitAgentMessage()])
+
+    await vi.waitFor(() => expect(callImageApi).toHaveBeenCalledOnce())
+    expect(useStore.getState().tasks).toHaveLength(1)
+    expect(useStore.getState().agentConversations[0].rounds).toHaveLength(1)
+    request.resolve({ images: ['data:image/png;base64,output'] })
+    await vi.waitFor(() => expect(useStore.getState().agentConversations[0].rounds[0].status).toBe('done'))
+  })
+
   it('keeps stopped tasks and messages stopped even when a gateway returns late', async () => {
     const request = deferred<Awaited<ReturnType<typeof callImageApi>>>()
     vi.mocked(callImageApi).mockImplementationOnce(() => request.promise)
