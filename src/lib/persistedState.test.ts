@@ -58,6 +58,23 @@ function fallback() {
 }
 
 describe('persisted state codec', () => {
+  it('restores personal templates and remembers an intentionally emptied library', () => {
+    const persisted = createPersistedState({
+      ...source(),
+      appMode: 'batch',
+      promptLibrary: [{ id: 'custom', title: '我的重绘', text: '固定指令', updatedAt: 9 }],
+      promptLibrarySeeded: true,
+    })
+    const restored = normalizePersistedState(persisted, fallback(), 100)!.state
+    expect(restored.appMode).toBe('batch')
+    expect(restored.promptLibrary).toEqual(persisted.promptLibrary)
+    expect(restored.promptLibrarySeeded).toBe(true)
+    expect(normalizePersistedState({ promptLibrary: [] }, fallback(), 100)!.state).toMatchObject({
+      promptLibrary: [],
+      promptLibrarySeeded: true,
+    })
+    expect(normalizePersistedState({}, fallback(), 100)!.state.promptLibrarySeeded).toBe(false)
+  })
   it.each([undefined, 'custom-image-model', '', '   '])('restores profile and legacy top-level tool model %s without autofilling', (imageGenerationModel) => {
     const profile = { apiMode: 'responses', model: 'legacy-text-model', ...(imageGenerationModel === undefined ? {} : { imageGenerationModel }) }
     for (const settings of [profile, { profiles: [profile] }]) {

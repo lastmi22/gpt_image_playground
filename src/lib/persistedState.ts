@@ -1,4 +1,4 @@
-import type { AgentConversation, AgentInputDraft, AppMode, AppSettings, FavoriteCollection, InputImage, MaskDraft, PresetConfig, TaskParams } from '../types'
+import type { AgentConversation, AgentInputDraft, AppMode, AppSettings, FavoriteCollection, InputImage, MaskDraft, PresetConfig, PromptTemplate, TaskParams } from '../types'
 import { normalizePresetAgent, normalizeSettings } from './apiProfiles'
 import { normalizeAgentConversations } from './agentConversationState'
 import { ensureDefaultFavoriteCollection, normalizeFavoriteCollections, resolveDefaultFavoriteCollectionId } from './favoriteState'
@@ -27,6 +27,8 @@ export interface PersistedAppState {
   supportPromptDismissed: boolean
   supportPromptOpen: boolean
   supportPromptSkippedForImportedData: boolean
+  promptLibrary?: PromptTemplate[]
+  promptLibrarySeeded?: boolean
 }
 
 type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages' | 'agentConversations'> & {
@@ -42,6 +44,7 @@ type PersistedStateFallback = Pick<
   'settings' | 'params' | 'dismissedPresetProfileIds' | 'dismissedPresetProviderIds' | 'dismissedCodexCliPrompts' | 'favoriteCollections' | 'defaultFavoriteCollectionId'
 > & {
   agentConversations: AgentConversation[]
+  promptLibrary?: PromptTemplate[]
 }
 
 export type NormalizedPersistedAppState = PersistedAppState & {
@@ -70,6 +73,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeStringArray(value: unknown, fallback: string[]) {
   if (!Array.isArray(value)) return fallback
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+function normalizePromptLibrary(value: unknown, fallback: PromptTemplate[], now = Date.now()): PromptTemplate[] {
+  if (!Array.isArray(value)) return fallback
+  return value
+    .map((item, index): PromptTemplate | null => {
+      if (!isRecord(item) || typeof item.text !== 'string') return null
+      const text = item.text.trim()
+      if (!text) return null
+      return {
+        id: typeof item.id === 'string' && item.id ? item.id : `prompt-${now}-${index}`,
+        title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `提示词 ${index + 1}`,
+        text,
+        updatedAt: typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : now,
+      }
+    })
+    .filter((item): item is PromptTemplate => item != null)
 }
 
 function normalizeParams(value: unknown, fallback: TaskParams): TaskParams {
@@ -122,6 +142,8 @@ export function createPersistedState(state: PersistedStateSource, includeLegacyA
     supportPromptDismissed: state.supportPromptDismissed,
     supportPromptOpen: state.supportPromptOpen,
     supportPromptSkippedForImportedData: state.supportPromptSkippedForImportedData,
+    promptLibrary: state.promptLibrary,
+    promptLibrarySeeded: state.promptLibrarySeeded,
   }
 }
 
@@ -161,7 +183,7 @@ export function normalizePersistedState(
   )
     ? persistedState.activeAgentConversationId
     : agentConversations[0]?.id ?? null
-  const appMode = persistedState.appMode === 'agent' ? 'agent' : 'gallery'
+  const appMode = persistedState.appMode === 'batch' ? 'batch' : persistedState.appMode === 'agent' ? 'agent' : 'gallery'
   const galleryInputDraft = settings.persistInputOnRestart
     ? normalizeAgentInputDraft(persistedState.galleryInputDraft ?? {
         prompt: persistedState.prompt,
@@ -218,6 +240,8 @@ export function normalizePersistedState(
       supportPromptDismissed: Boolean(persistedState.supportPromptDismissed),
       supportPromptOpen: Boolean(persistedState.supportPromptOpen),
       supportPromptSkippedForImportedData: Boolean(persistedState.supportPromptSkippedForImportedData),
+      promptLibrary: normalizePromptLibrary(persistedState.promptLibrary, fallback.promptLibrary ?? [], now),
+      promptLibrarySeeded: persistedState.promptLibrarySeeded === true || Array.isArray(persistedState.promptLibrary),
       prompt: restoredAgentDraft ? restoredAgentDraft.prompt : galleryInputDraft?.prompt ?? '',
       inputImages: restoredAgentDraft ? restoredAgentDraft.inputImages : galleryInputDraft?.inputImages ?? [],
       maskDraft: restoredAgentDraft ? restoredAgentDraft.maskDraft : galleryInputDraft?.maskDraft ?? null,

@@ -8,17 +8,16 @@ import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigration
 import { useAppFonts } from './hooks/useAppFonts'
 import { useCloseConfirm } from './hooks/useCloseConfirm'
 import { promptImportLink, useImportLinks } from './hooks/useImportLinks'
-import { useAutoUpdateCheck } from './hooks/useReleaseUpdates'
 import { useSaveLocationPrompt } from './hooks/useSaveLocationPrompt'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import AgentWorkspace from './components/AgentWorkspace'
 import InputBar from './components/InputBar'
+import RedrawWorkspace from './components/RedrawWorkspace'
 import DetailModal from './components/DetailModal'
 import Lightbox from './components/Lightbox'
 import SettingsModal from './components/SettingsModal'
-import UpdateModal from './components/UpdateModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import DataProgressDialog from './components/DataProgressDialog'
 import Toast from './components/Toast'
@@ -26,8 +25,6 @@ import DbBlockedNotice from './components/DbBlockedNotice'
 import MaskEditorModal from './components/MaskEditorModal'
 import SketchBoardModal from './components/SketchBoardModal'
 import ImageContextMenu from './components/ImageContextMenu'
-import SupportPromptModal from './components/SupportPromptModal'
-import AnnouncementModal from './components/AnnouncementModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
 import { showStartupNotices, type NoticeSection } from './components/startupNotice'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
@@ -45,16 +42,40 @@ export default function App() {
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const writeLogFile = useStore((s) => s.settings.writeLogFile)
   const saveLocationMode = useStore((s) => s.settings.saveLocationMode)
-  const autoCheckUpdate = useStore((s) => s.settings.autoCheckUpdate)
+  const promptLibrarySeeded = useStore((s) => s.promptLibrarySeeded)
+  const setPromptLibrary = useStore((s) => s.setPromptLibrary)
   const [startupImportDone, setStartupImportDone] = useState(false)
   useDockerApiUrlMigrationNotice()
   useAppFonts()
   useGlobalClickSuppression()
   useCloseConfirm()
   useSaveLocationPrompt()
-  useAutoUpdateCheck(autoCheckUpdate)
   // 运行中的链接导入要等启动时的预置配置写入完，否则会被启动流程覆盖
   useImportLinks(startupImportDone)
+
+  useEffect(() => {
+    if (!startupImportDone || promptLibrarySeeded) return
+    let cancelled = false
+    void fetch(`${import.meta.env.BASE_URL}default-prompts.json`)
+      .then((response) => response.ok ? response.json() as Promise<unknown> : [])
+      .then((value) => {
+        if (cancelled || useStore.getState().promptLibrarySeeded || !Array.isArray(value)) return
+        const now = Date.now()
+        setPromptLibrary(value
+          .filter((item): item is { id?: string; title?: string; text?: string } => Boolean(item && typeof item === 'object'))
+          .filter((item) => typeof item.text === 'string' && item.text.trim())
+          .map((item, index) => ({
+            id: typeof item.id === 'string' && item.id ? item.id : `imported-prompt-${index}`,
+            title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `提示词 ${index + 1}`,
+            text: item.text!.trim(),
+            updatedAt: now,
+          })))
+      })
+      .catch((error) => console.warn('加载默认提示词失败：', error))
+    return () => {
+      cancelled = true
+    }
+  }, [startupImportDone, promptLibrarySeeded, setPromptLibrary])
 
   useEffect(() => {
     if (!isTauri) return
@@ -197,7 +218,9 @@ export default function App() {
   return (
     <>
       <Header />
-      {appMode === 'agent' ? (
+      {appMode === 'batch' ? (
+        <RedrawWorkspace />
+      ) : appMode === 'agent' ? (
         <AgentWorkspace />
       ) : (
         <main data-home-main data-drag-select-surface className="pb-48">
@@ -207,16 +230,12 @@ export default function App() {
           </div>
         </main>
       )}
-      <InputBar />
+      {appMode !== 'batch' && <InputBar />}
       <DetailModal />
       <Lightbox />
       <SettingsModal />
-      <UpdateModal />
       <DataProgressDialog />
       <ConfirmDialog />
-      <SupportPromptModal />
-      {/* 等启动时的任务加载和预置配置导入完成，再按图片数量等条件筛选公告 */}
-      <AnnouncementModal ready={startupImportDone} />
       <FavoriteCollectionPickerModal />
       <ManageCollectionsModal />
       <Toast />

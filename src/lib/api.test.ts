@@ -27,6 +27,29 @@ describe('callImageApi', () => {
     vi.useRealTimers()
   })
 
+  it.each(['images', 'responses'] as const)('aborts an in-flight %s request when the caller stops', async (apiMode) => {
+    const controller = new AbortController()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const signal = init!.signal!
+      return await new Promise<Response>((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason)
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    const pending = callImageApi({
+      settings: { ...DEFAULT_SETTINGS, apiKey: 'mock', apiMode },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS },
+      inputImageDataUrls: [],
+      signal: controller.signal,
+    })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    controller.abort(new DOMException('用户停止', 'AbortError'))
+    await rejection
+    expect(fetchMock.mock.calls[0][1]!.signal!.aborted).toBe(true)
+  })
+
   it.each([false, true])(
     'adds the prompt rewrite guard on Responses API when Codex CLI mode is %s',
     async (codexCli) => {

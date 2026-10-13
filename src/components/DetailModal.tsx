@@ -10,6 +10,7 @@ import { copyImageSourceToClipboard, copyTextToClipboard, getClipboardFailureMes
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { dismissAllTooltips } from '../lib/tooltipDismiss'
 import { downloadImageEntriesAsZip, downloadImageIds, getDownloadErrorMessage, getImageZipEntries, withSaveLocation } from '../lib/downloadImages'
+import { getRedrawFileBase } from '../lib/redrawBatch'
 import { isAgentTaskPromptPending } from '../lib/taskPromptDisplay'
 import { getImageComments, getTaskPromptText, replaceImageMentionsForApi } from '../lib/promptImageMentions'
 import { getApiProviderLabel } from '../lib/apiProfiles'
@@ -362,7 +363,7 @@ export default function DetailModal() {
     if (!currentOutputImageId || !task) return
 
     try {
-      const result = await downloadImageIds([currentOutputImageId], `task-${task.id}`)
+      const result = await downloadImageIds([currentOutputImageId], task.sourceName ? getRedrawFileBase(task.sourceName, task.id) : `task-${task.id}`)
       if (result.canceled) return
       if (result.successCount === 0) {
         showToast(getDownloadErrorMessage(result.error), 'error')
@@ -380,7 +381,7 @@ export default function DetailModal() {
     if (!currentOriginalOutputImageId || !task) return
 
     try {
-      const result = await downloadImageIds([currentOriginalOutputImageId], `task-${task.id}-orig`)
+      const result = await downloadImageIds([currentOriginalOutputImageId], `${task.sourceName ? getRedrawFileBase(task.sourceName, task.id) : `task-${task.id}`}-orig`)
       if (result.canceled) return
       if (result.successCount === 0) {
         showToast(getDownloadErrorMessage(result.error), 'error')
@@ -398,7 +399,7 @@ export default function DetailModal() {
     if (!task?.outputImages?.length) return
 
     try {
-      const fileNameBase = `task-${task.id}`
+      const fileNameBase = task.sourceName ? getRedrawFileBase(task.sourceName, task.id) : `task-${task.id}`
       const result = settings.zipDownloadRoutes.includes('task-detail-all')
         ? await downloadImageEntriesAsZip(getImageZipEntries(task.outputImages, fileNameBase), fileNameBase)
         : await downloadImageIds(task.outputImages, fileNameBase)

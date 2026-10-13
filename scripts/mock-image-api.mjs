@@ -1,10 +1,13 @@
 import http from 'node:http'
+import { readFileSync } from 'node:fs'
 
 const port = Number(process.env.MOCK_IMAGE_API_PORT || 8787)
 const host = process.env.MOCK_IMAGE_API_HOST || '127.0.0.1'
 const defaultMode = process.env.MOCK_IMAGE_API_MODE || 'url-cors-block'
 
-const tinyPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
+const tinyPngBase64 = process.env.MOCK_IMAGE_API_FILE
+  ? readFileSync(process.env.MOCK_IMAGE_API_FILE).toString('base64')
+  : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
 const tinyPng = Buffer.from(tinyPngBase64, 'base64')
 
 const pathModes = new Set([
@@ -314,7 +317,8 @@ async function maybeSendStreamFailure(res, mode, prefix = 'image_generation') {
 async function handleApi(req, res, url) {
   const body = req.method === 'GET' ? { json: null } : await readBody(req)
   const mode = getMode(url, body.json)
-  const n = getRequestedN(url, body.json)
+  const multipartN = body.text?.match(/name="n"\r?\n\r?\n(\d+)/)?.[1]
+  const n = getRequestedN(url, body.json ?? (multipartN ? { n: Number(multipartN) } : null))
 
   if (mode === 'slow') {
     const delayMs = Math.max(1, Number(url.searchParams.get('delayMs') || 15000))

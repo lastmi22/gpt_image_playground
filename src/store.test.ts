@@ -163,6 +163,71 @@ describe('error toast messages', () => {
   })
 })
 
+describe('Images conversation', () => {
+  beforeEach(async () => {
+    await clearTasks()
+    await clearImages()
+    vi.mocked(callImageApi).mockReset()
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        apiMode: 'images',
+        agentApiConfigMode: 'off',
+        profiles: DEFAULT_SETTINGS.profiles.map((profile, index) => index === 0
+          ? { ...profile, apiKey: 'mock', apiMode: 'images' as const }
+          : profile),
+      }),
+      params: { ...DEFAULT_PARAMS },
+      appMode: 'agent',
+      tasks: [],
+      prompt: '',
+      inputImages: [],
+      maskDraft: null,
+      agentEditingRoundId: null,
+      agentConversations: [agentConversation()],
+      activeAgentConversationId: 'conversation-a',
+      agentInputDrafts: {},
+      batchProgress: null,
+      showToast: vi.fn(),
+    })
+  })
+
+  it('uses the previous generated image in the next request and keeps both rounds', async () => {
+    vi.mocked(callImageApi).mockResolvedValue({
+      images: ['data:image/png;base64,first-output'],
+    })
+    useStore.getState().setPrompt('生成图片')
+    await submitAgentMessage()
+    await vi.waitFor(() => expect(useStore.getState().agentConversations[0].rounds[0].status).toBe('done'))
+    const firstOutput = useStore.getState().tasks[0].outputImages[0]
+    useStore.getState().setPrompt('把背景改成白色')
+    await submitAgentMessage()
+    await vi.waitFor(() => expect(useStore.getState().agentConversations[0].rounds[1].status).toBe('done'))
+    expect(vi.mocked(callImageApi).mock.calls[1][0].inputImageDataUrls).toEqual(['data:image/png;base64,first-output'])
+    expect(useStore.getState().agentConversations[0].rounds[1]).toMatchObject({
+      inputImageIds: [firstOutput],
+      parentRoundId: useStore.getState().agentConversations[0].rounds[0].id,
+    })
+    expect(useStore.getState().tasks).toHaveLength(2)
+  })
+
+  it('keeps stopped tasks and messages stopped even when a gateway returns late', async () => {
+    const request = deferred<Awaited<ReturnType<typeof callImageApi>>>()
+    vi.mocked(callImageApi).mockImplementationOnce(() => request.promise)
+    useStore.getState().setPrompt('生成图片')
+    await submitAgentMessage()
+    await vi.waitFor(() => expect(callImageApi).toHaveBeenCalledOnce())
+    const signal = vi.mocked(callImageApi).mock.calls[0][0].signal!
+    stopAgentResponse()
+    expect(signal.aborted).toBe(true)
+    request.resolve({ images: ['data:image/png;base64,late-output'] })
+    await vi.waitFor(() => expect(useStore.getState().tasks[0].status).toBe('error'))
+    expect(useStore.getState().tasks[0].outputImages).toEqual([])
+    expect(useStore.getState().agentConversations[0].rounds[0].error).toBe('已停止生成。')
+    expect(useStore.getState().agentConversations[0].messages[1].content).toBe('已停止生成。')
+  })
+})
+
 function agentConversation(overrides: Partial<AgentConversation> = {}): AgentConversation {
   return {
     id: 'conversation-a',

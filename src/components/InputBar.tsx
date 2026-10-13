@@ -27,6 +27,7 @@ import ButtonTooltip from './input/buttonTooltip'
 import DragUploadOverlay from './input/dragUploadOverlay'
 import InputBatchBars from './input/inputBatchBars'
 import InputParamsPanel from './input/inputParamsPanel'
+import PromptLibraryPanel from './PromptLibraryPanel'
 
 function getFavoriteCollectionTasksForBatch(collectionId: string, tasks: TaskRecord[], defaultFavoriteCollectionId: string | null) {
   const favoriteTasks = tasks.filter((task) => task.isFavorite)
@@ -122,6 +123,7 @@ export default function InputBar() {
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const searchQuery = useStore((s) => s.searchQuery)
+  const [showPromptLibrary, setShowPromptLibrary] = useState(false)
 
   const filteredTasks = useMemo(() => {
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
@@ -509,7 +511,9 @@ export default function InputBar() {
   }, [setPrompt])
   const activeProvider = activeProfile.provider
   const isFalProvider = activeProvider === 'fal'
-  const agentAutoImageCount = appMode === 'agent'
+  const agentAutoImageCount = appMode === 'agent' && (
+    settings.agentApiConfigMode !== 'off' || (activeProfile.provider === 'openai' && activeProfile.apiMode === 'responses')
+  )
   const moderationDisabled = isFalProvider
   const transparentOutputAvailable = appMode === 'gallery'
   const showTransparentOutputControl = transparentOutputAvailable && (params.output_format === 'png' || params.output_format === 'webp')
@@ -1780,6 +1784,16 @@ export default function InputBar() {
             <div className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
           </div>
 
+          <div className="mb-2 flex items-center">
+            <button
+              type="button"
+              onClick={() => setShowPromptLibrary((visible) => !visible)}
+              className={`rounded-lg px-2 py-1 text-[11px] font-medium transition ${showPromptLibrary ? 'bg-blue-500 text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.08] dark:hover:text-gray-200'}`}
+              aria-expanded={showPromptLibrary}
+            >
+              提示词库
+            </button>
+          </div>
           {/* 输入图片行（移动端可折叠） */}
           {inputImages.length > 0 && (
             isMobile ? (
@@ -1802,6 +1816,7 @@ export default function InputBar() {
 
           {/* 输入框 */}
           <div className={`relative grid sm:[contain:inline-size]${promptExpanded ? ' min-h-0 flex-1' : ''}`}>
+            {showPromptLibrary && <PromptLibraryPanel onClose={() => setShowPromptLibrary(false)} />}
             {showAtImageMenu && (
               <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-transparent bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:bg-gray-800/95 dark:ring-white/[0.06]">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>

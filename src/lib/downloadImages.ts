@@ -5,6 +5,7 @@ import { getNumberedFileNameBase, sanitizeFileNamePart } from './exportFileName'
 import { ensureImageCached } from './imageCache'
 import { apiFetch, isTauri } from './platform'
 import { pickSaveDir, saveFile, saveFileToDir, type SaveDir } from './saveFile'
+import { getRedrawFileBase } from './redrawBatch'
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -29,7 +30,7 @@ export interface DownloadImageZipEntry {
   fileNameBase?: string
 }
 
-type TaskOutputZipTask = Pick<TaskRecord, 'id' | 'createdAt' | 'outputImages'>
+type TaskOutputZipTask = Pick<TaskRecord, 'id' | 'createdAt' | 'outputImages' | 'sourceName'>
 
 export { formatExportFileTime } from './exportFileName'
 
@@ -138,7 +139,7 @@ export async function downloadImageEntriesAsZip(entries: DownloadImageZipEntry[]
 export function getTaskOutputImageZipEntries(tasks: TaskOutputZipTask[]): DownloadImageZipEntry[] {
   return [...tasks]
     .sort((a, b) => b.createdAt - a.createdAt)
-    .flatMap((task) => getImageZipEntries(task.outputImages || [], `task-${task.id}`))
+    .flatMap((task) => getImageZipEntries(task.outputImages || [], task.sourceName ? getRedrawFileBase(task.sourceName, task.id) : `task-${task.id}`))
 }
 
 export function getImageZipEntries(imageIds: string[], fileNameBase = 'image'): DownloadImageZipEntry[] {

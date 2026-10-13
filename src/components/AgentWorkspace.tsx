@@ -755,7 +755,7 @@ export default function AgentWorkspace() {
         >
           {!conversation ? (
             <div className="py-20 text-center text-gray-400">
-              <p className="mb-3">还没有 Agent 对话</p>
+              <p className="mb-3">暂无图片会话</p>
               <button type="button" onClick={createConversation} className="rounded-lg bg-blue-500 px-4 py-2 text-white hover:bg-blue-600 transition-colors">创建对话</button>
             </div>
           ) : (
@@ -763,8 +763,7 @@ export default function AgentWorkspace() {
               if (activeMessages.length === 0) {
                 return (
                   <div className="py-20 text-center text-gray-400">
-                    <p className="mb-2">开始新的 Agent 对话</p>
-                    <p className="text-xs">在底部输入框发送消息即可创建第一轮对话。</p>
+                    <p className="mb-2">开始图片会话</p>
                   </div>
                 )
               }

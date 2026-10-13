@@ -385,6 +385,7 @@ async function parseResponsesApiStreamResponse(
   response: Response,
   mime: string,
   onPartialImage?: CallApiOptions['onPartialImage'],
+  signal?: AbortSignal,
 ): Promise<CallApiResult> {
   let completedPayload: ResponsesApiResponse | null = null
   const outputItems: ResponsesOutputItem[] = []
@@ -412,6 +413,7 @@ async function parseResponsesApiStreamResponse(
 
     completedPayload = payload
   }, {
+    signals: [signal],
     formatErrorMessage: appendStreamingFormatHint,
     getEventErrorMessage: getStreamEventErrorMessage,
   })
@@ -498,6 +500,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
   const paths = createOpenAICompatiblePaths()
 
   const controller = new AbortController()
+  const abortFromCaller = () => controller.abort(opts.signal?.reason)
+  if (opts.signal?.aborted) abortFromCaller()
+  opts.signal?.addEventListener('abort', abortFromCaller, { once: true })
   const timeoutId = setTimeout(() => controller.abort(createRequestTimeoutError(profile.timeout)), profile.timeout * 1000)
 
   try {
@@ -627,6 +632,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
     return await parseImagesApiResponse(await response.json() as ImageApiResponse, mime, controller.signal)
   } finally {
     clearTimeout(timeoutId)
+    opts.signal?.removeEventListener('abort', abortFromCaller)
   }
 }
 
@@ -920,6 +926,9 @@ async function callCustomHttpImageApi(opts: CallApiOptions, profile: ApiProfile,
   const isEdit = inputImageDataUrls.length > 0
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const controller = new AbortController()
+  const abortFromCaller = () => controller.abort(opts.signal?.reason)
+  if (opts.signal?.aborted) abortFromCaller()
+  opts.signal?.addEventListener('abort', abortFromCaller, { once: true })
   let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(() => controller.abort(createRequestTimeoutError(profile.timeout)), profile.timeout * 1000)
 
   try {
@@ -947,9 +956,10 @@ async function callCustomHttpImageApi(opts: CallApiOptions, profile: ApiProfile,
       clearTimeout(timeoutId)
       timeoutId = null
     }
-    return pollCustomTaskResult(profile, customProvider.poll, taskId, mime, controller.signal)
+    return await pollCustomTaskResult(profile, customProvider.poll, taskId, mime, controller.signal)
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
+    opts.signal?.removeEventListener('abort', abortFromCaller)
   }
 }
 
@@ -1023,6 +1033,9 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
   const useApiProxy = shouldUseApiProxy(profile.apiProxy, proxyConfig)
   const requestHeaders = createRequestHeaders(profile)
   const controller = new AbortController()
+  const abortFromCaller = () => controller.abort(opts.signal?.reason)
+  if (opts.signal?.aborted) abortFromCaller()
+  opts.signal?.addEventListener('abort', abortFromCaller, { once: true })
   const timeoutId = setTimeout(() => controller.abort(createRequestTimeoutError(profile.timeout)), profile.timeout * 1000)
 
   try {
@@ -1063,7 +1076,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
     }
 
     if (profile.streamImages && isEventStreamResponse(response)) {
-      return await parseResponsesApiStreamResponse(response, mime, opts.onPartialImage)
+      return await parseResponsesApiStreamResponse(response, mime, opts.onPartialImage, controller.signal)
     }
 
     const payload = await response.json() as ResponsesApiResponse
@@ -1081,5 +1094,6 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
     }
   } finally {
     clearTimeout(timeoutId)
+    opts.signal?.removeEventListener('abort', abortFromCaller)
   }
 }

@@ -3,7 +3,7 @@
 export type ApiMode = 'images' | 'responses'
 export const REASONING_EFFORT_VALUES = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 export type ReasoningEffort = typeof REASONING_EFFORT_VALUES[number]
-export type AppMode = 'gallery' | 'agent'
+export type AppMode = 'gallery' | 'agent' | 'batch'
 export type AgentApiConfigMode = 'off' | 'native' | 'hybrid'
 export const ZIP_DOWNLOAD_ROUTE_VALUES = [
   'task-selection',
@@ -134,6 +134,13 @@ export interface BatchProgress {
   finished: number
 }
 
+export interface PromptTemplate {
+  id: string
+  title: string
+  text: string
+  updatedAt: number
+}
+
 /** 批量提交模式：排队逐条执行，或按并发数同时执行 */
 export type BatchPromptMode = 'queue' | 'concurrent'
 
@@ -250,6 +257,9 @@ export type TaskStatus = 'running' | 'done' | 'error'
 export interface TaskRecord {
   id: string
   prompt: string
+  /** 批量重绘时对应的源文件名，用于结果追溯和导出命名 */
+  sourceName?: string
+  redrawBatchId?: string
   params: TaskParams
   /** 生成时使用的 Provider 类型 */
   apiProvider?: ApiProvider

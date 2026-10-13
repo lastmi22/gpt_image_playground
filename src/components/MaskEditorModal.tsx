@@ -28,9 +28,9 @@ import {
   UndoIcon,
   getEditorToolButtonClass,
 } from './editor/EditorControls'
-import { CloseIcon } from './icons'
+import { CloseIcon, SketchIcon } from './icons'
 
-type Tool = 'brush' | 'eraser'
+type Tool = 'brush' | 'eraser' | 'lasso'
 
 interface CanvasSize {
   width: number
@@ -92,6 +92,7 @@ function MaskEditor({ imageId }: { imageId: string }) {
   const viewRef = useRef<HTMLDivElement>(null)
   const activePointerIdRef = useRef<number | null>(null)
   const lastPointRef = useRef<Point | null>(null)
+  const lassoPointsRef = useRef<Point[]>([])
   const undoStackRef = useRef<ImageData[]>([])
   const redoStackRef = useRef<ImageData[]>([])
   const previewFrameRef = useRef<number | null>(null)
@@ -99,7 +100,7 @@ function MaskEditor({ imageId }: { imageId: string }) {
 
   const [sourceDataUrl, setSourceDataUrl] = useState('')
   const [size, setSize] = useState<CanvasSize | null>(null)
-  const [tool, setTool] = useState<Tool>('brush')
+  const [tool, setTool] = useState<Tool>('lasso')
   const [brushSize, setBrushSize] = useState(64)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -164,6 +165,21 @@ function MaskEditor({ imageId }: { imageId: string }) {
     previewCtx.globalCompositeOperation = 'destination-out'
     previewCtx.drawImage(maskCanvas, 0, 0)
     previewCtx.restore()
+    const points = lassoPointsRef.current
+    if (points.length > 1) {
+      previewCtx.save()
+      previewCtx.beginPath()
+      previewCtx.moveTo(points[0].x, points[0].y)
+      for (const point of points.slice(1)) previewCtx.lineTo(point.x, point.y)
+      previewCtx.closePath()
+      previewCtx.fillStyle = 'rgba(59, 130, 246, 0.22)'
+      previewCtx.fill()
+      previewCtx.strokeStyle = '#fff'
+      previewCtx.lineWidth = Math.max(2, previewCanvas.width / 450)
+      previewCtx.setLineDash([previewCtx.lineWidth * 3, previewCtx.lineWidth * 2])
+      previewCtx.stroke()
+      previewCtx.restore()
+    }
   }
 
   function renderPreview() {
@@ -198,6 +214,8 @@ function MaskEditor({ imageId }: { imageId: string }) {
     if (previous) restoreMask(previous)
     activePointerIdRef.current = null
     lastPointRef.current = null
+    lassoPointsRef.current = []
+    renderPreview()
     syncHistoryState()
   }
 
@@ -355,7 +373,8 @@ function MaskEditor({ imageId }: { imageId: string }) {
     pushUndoSnapshot()
     const point = getCanvasPoint(canvas, event)
     lastPointRef.current = point
-    drawAt(point)
+    if (tool === 'lasso') lassoPointsRef.current = [point]
+    else drawAt(point)
   }
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -369,11 +388,34 @@ function MaskEditor({ imageId }: { imageId: string }) {
     }
     if (activePointerIdRef.current !== event.pointerId || !lastPointRef.current || !isReady || isSaving) return
     event.preventDefault()
-    drawStroke(lastPointRef.current, point)
+    if (tool === 'lasso') {
+      lassoPointsRef.current.push(point)
+      renderPreview()
+    } else drawStroke(lastPointRef.current, point)
     lastPointRef.current = point
   }
 
   const finishStroke = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activePointerIdRef.current === event.pointerId && tool === 'lasso') {
+      const points = lassoPointsRef.current
+      const ctx = maskCanvasRef.current?.getContext('2d')
+      if (ctx && points.length > 2) {
+        ctx.save()
+        ctx.globalCompositeOperation = 'destination-out'
+        ctx.fillStyle = '#fff'
+        ctx.beginPath()
+        ctx.moveTo(points[0].x, points[0].y)
+        for (const point of points.slice(1)) ctx.lineTo(point.x, point.y)
+        ctx.closePath()
+        ctx.fill()
+        ctx.restore()
+      } else {
+        undoStackRef.current.pop()
+        syncHistoryState()
+      }
+      lassoPointsRef.current = []
+      renderPreview()
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -456,7 +498,7 @@ function MaskEditor({ imageId }: { imageId: string }) {
     : isAdjustingSize
     ? hoverPoint ?? viewport.getVisibleCenter(viewport.frameWidth / size.width)
     : hoverPoint
-  const canvasCursor = viewport.isPanning ? 'grabbing' : viewport.isAltPressed ? 'grab' : brushPoint ? 'none' : 'crosshair'
+  const canvasCursor = viewport.isPanning ? 'grabbing' : viewport.isAltPressed ? 'grab' : brushPoint && tool !== 'lasso' ? 'none' : 'crosshair'
 
   return (
     <EditorShell onBackdropClick={close}>
@@ -473,6 +515,9 @@ function MaskEditor({ imageId }: { imageId: string }) {
             </TooltipButton>
             <TooltipButton tooltip="橡皮擦" className={getEditorToolButtonClass(tool === 'eraser')} disabled={!isReady || isSaving} onClick={() => setTool('eraser')}>
               <EraserIcon />
+            </TooltipButton>
+            <TooltipButton tooltip="自由圈选" className={getEditorToolButtonClass(tool === 'lasso')} disabled={!isReady || isSaving} onClick={() => setTool('lasso')}>
+              <SketchIcon className="h-5 w-5" />
             </TooltipButton>
           </>
         }
@@ -500,7 +545,10 @@ function MaskEditor({ imageId }: { imageId: string }) {
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishStroke}
-          onPointerCancel={finishStroke}
+          onPointerCancel={(event) => {
+            cancelActiveStroke()
+            viewport.pointerUp(event)
+          }}
           onLostPointerCapture={finishStroke}
           onPointerLeave={() => setHoverPoint(null)}
         >
@@ -524,7 +572,7 @@ function MaskEditor({ imageId }: { imageId: string }) {
               <canvas ref={previewCanvasRef} className="absolute inset-0 h-full w-full" />
               <canvas ref={maskCanvasRef} className="absolute inset-0 h-full w-full opacity-0" />
             </div>
-            {brushPoint && (
+            {brushPoint && tool !== 'lasso' && (
               <BrushCursor
                 x={brushPoint.x * viewScale + viewport.transform.x}
                 y={brushPoint.y * viewScale + viewport.transform.y}
@@ -539,7 +587,7 @@ function MaskEditor({ imageId }: { imageId: string }) {
           </div>
         )}
 
-        <EditorSizeSlider
+        {tool !== 'lasso' && <EditorSizeSlider
           value={brushSize}
           min={8}
           max={220}
@@ -548,7 +596,7 @@ function MaskEditor({ imageId }: { imageId: string }) {
           onChange={setBrushSize}
           onAdjustStart={() => setIsAdjustingSize(true)}
           onAdjustEnd={() => setIsAdjustingSize(false)}
-        />
+        />}
 
         {viewport.isZoomed && <EditorResetViewButton onClick={resetViewTransform} />}
       </div>

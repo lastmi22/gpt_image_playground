@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { hasInterruptibleOperations } from '../lib/dataOperations'
 import { isTauri } from '../lib/platform'
 import { setTauriCloseGuard } from '../lib/tauriStorage'
+import { useRedrawWorkspace } from '../lib/redrawWorkspace'
 
 // AppState 未导出，从 store 推导确认框类型
 type ConfirmDialogState = NonNullable<ReturnType<typeof useStore.getState>['confirmDialog']>
@@ -13,12 +14,24 @@ type ConfirmDialogState = NonNullable<ReturnType<typeof useStore.getState>['conf
  */
 export function useCloseConfirm() {
   useEffect(() => {
+    if (isTauri) return
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      const state = useStore.getState()
+      if (!useRedrawWorkspace.getState().running && !hasInterruptibleOperations(state.tasks, state.agentConversations, state.batchProgress)) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
+
+  useEffect(() => {
     if (!isTauri) return
     let waiting = false
 
     setTauriCloseGuard(async () => {
       const state = useStore.getState()
-      if (!hasInterruptibleOperations(state.tasks, state.agentConversations, state.batchProgress)) return true
+      if (!useRedrawWorkspace.getState().running && !hasInterruptibleOperations(state.tasks, state.agentConversations, state.batchProgress)) return true
       // 确认仍在等待时再次请求关闭，直接关闭（即连点两次关闭会跳过确认，这是有意为之）：确认框可能因渲染异常没有显示出来，否则窗口将无法关闭
       if (waiting) return true
 

@@ -21,8 +21,9 @@ import type {
   ResponsesOutputItem,
   StoredImage,
   StoredImageThumbnail,
+  PromptTemplate,
 } from './types'
-import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
+import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS, MAX_INPUT_IMAGES } from './types'
 import { DEFAULT_SETTINGS, getActiveApiProfile, getAgentImageApiProfile, getAgentTextApiProfile, getCustomProviderDefinition, mergeImportedSettings, mergePresetImportedSettings, normalizeSettings, resolveApiProfileModel, splitModelList, validateApiProfile } from './lib/apiProfiles'
 import { enforcePresetConfigPolicy, getPresetConfig, getPresetProfileIds, getPresetProviderIds, isPresetConfigDeletionPrevented, isPresetConfigOnlyEnabled, isPresetConfigParamsLocked, isPresetProfile, isPresetProviderDeletionPrevented } from './lib/presetConfig'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
@@ -428,6 +429,12 @@ interface AppState {
   supportPromptSkippedForImportedData: boolean
   setSupportPromptOpen: (v: boolean) => void
   dismissSupportPrompt: () => void
+  promptLibrary: PromptTemplate[]
+  promptLibrarySeeded: boolean
+  setPromptLibrary: (templates: PromptTemplate[]) => void
+  addPromptTemplate: (template?: Partial<PromptTemplate>) => string
+  updatePromptTemplate: (id: string, patch: Partial<Pick<PromptTemplate, 'title' | 'text'>>) => void
+  deletePromptTemplate: (id: string) => void
 
   // Toast
   toast: { message: string; type: ToastType } | null
@@ -531,9 +538,9 @@ export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
       // Mode
-      appMode: 'gallery',
+      appMode: 'agent',
       setAppMode: (appMode) => {
-        if (appMode === 'gallery') {
+        if (appMode !== 'agent') {
           const state = get()
           const agentInputDrafts = saveActiveAgentInputDrafts(state)
           const galleryInputDraft = saveGalleryInputDraft(state)
@@ -545,17 +552,16 @@ export const useStore = create<AppState>()(
             selectedTaskIds: [],
             selectedFavoriteCollectionIds: [],
             agentEditingRoundId: null,
-            ...(state.appMode === 'agent' ? restoreGalleryInputDraftState(galleryInputDraft) : {}),
+            ...(appMode === 'gallery' && state.appMode !== 'gallery' ? restoreGalleryInputDraftState(galleryInputDraft) : {}),
           }))
           return
         }
 
         const state = get()
         const settings = normalizeSettings(state.settings)
-        const activeProfile = getActiveApiProfile(settings)
         const agentValidationError = getAgentProfileValidationError(settings)
 
-        if (!agentValidationError) {
+        if (!agentValidationError || settings.agentApiConfigMode === 'off') {
           const galleryInputDraft = saveGalleryInputDraft(state)
           set((state) => ({
             appMode: 'agent',
@@ -570,39 +576,13 @@ export const useStore = create<AppState>()(
           return
         }
 
-        if (settings.agentApiConfigMode === 'off' && activeProfile.provider === 'openai' && activeProfile.apiMode !== 'responses') {
-          state.setConfirmDialog({
-            title: '需要 Responses API 配置',
-            message: `当前配置「${activeProfile.name}」使用的是 Images API，仅支持生成图片，无 Agent 模式需要的对话能力。\n\n请前往 API 配置页，将当前配置调整为 Responses API，或切换/新建一个支持 Responses API 的配置。`,
-            confirmText: '去设置',
-            cancelText: '取消',
-            action: () => {
-              useStore.getState().setShowSettings(true, 'api')
-            },
-          })
-          return
-        }
-
-        if (settings.agentApiConfigMode !== 'off') {
-          state.setConfirmDialog({
-            title: 'Agent API 配置不完整',
-            message: `${agentValidationError.message}\n\n请前往 Agent 配置页，选择或新建可用配置。`,
-            confirmText: '去设置',
-            cancelText: '取消',
-            action: () => {
-              useStore.getState().setShowSettings(true, 'agent')
-            },
-          })
-          return
-        }
-
         state.setConfirmDialog({
-          title: '配置不支持 Agent 模式',
-          message: `当前配置「${activeProfile.name}」所属的服务商暂不支持 Agent 模式。Agent 模式需要使用支持 Responses API 的 OpenAI 配置。\n\n请前往 API 配置页，切换或新建一个支持 Responses API 的配置。`,
+          title: '图片会话配置不完整',
+          message: `${agentValidationError.message}\n\n请前往会话配置页，选择或新建可用配置。`,
           confirmText: '去设置',
           cancelText: '取消',
           action: () => {
-            useStore.getState().setShowSettings(true, 'api')
+            useStore.getState().setShowSettings(true, 'agent')
           },
         })
       },
@@ -1049,6 +1029,37 @@ export const useStore = create<AppState>()(
       supportPromptSkippedForImportedData: false,
       setSupportPromptOpen: (supportPromptOpen) => set({ supportPromptOpen }),
       dismissSupportPrompt: () => set({ supportPromptOpen: false, supportPromptDismissed: true }),
+      promptLibrary: [],
+      promptLibrarySeeded: false,
+      setPromptLibrary: (promptLibrary) => set({
+        promptLibrarySeeded: true,
+        promptLibrary: promptLibrary
+          .filter((item) => item.text.trim())
+          .map((item) => ({
+            ...item,
+            title: item.title.trim() || '未命名提示词',
+            text: item.text.trim(),
+          })),
+      }),
+      addPromptTemplate: (template = {}) => {
+        const id = template.id || `prompt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        const next: PromptTemplate = {
+          id,
+          title: template.title?.trim() || '新提示词',
+          text: template.text?.trim() || '',
+          updatedAt: Date.now(),
+        }
+        set((state) => ({ promptLibrary: [...state.promptLibrary, next], promptLibrarySeeded: true }))
+        return id
+      },
+      updatePromptTemplate: (id, patch) => set((state) => ({
+        promptLibrary: state.promptLibrary.map((item) => item.id === id
+          ? { ...item, ...patch, updatedAt: Date.now() }
+          : item),
+      })),
+      deletePromptTemplate: (id) => set((state) => ({
+        promptLibrary: state.promptLibrary.filter((item) => item.id !== id),
+      })),
 
       // Toast
       toast: null,
@@ -2464,6 +2475,11 @@ export async function submitAgentMessage() {
     return
   }
   const normalizedSettings = normalizeSettings(settings)
+  const imageOnlyProfile = getActiveApiProfile(normalizedSettings)
+  if (normalizedSettings.agentApiConfigMode === 'off' && (imageOnlyProfile.provider !== 'openai' || imageOnlyProfile.apiMode === 'images')) {
+    await submitImageConversation()
+    return
+  }
 
   const agentValidationError = getAgentProfileValidationError(normalizedSettings)
   if (agentValidationError) {
@@ -2614,6 +2630,13 @@ export async function regenerateAgentAssistantMessage(conversationId: string, ro
   const state = useStore.getState()
   const { settings, params, showToast } = state
   const normalizedSettings = normalizeSettings(settings)
+  const imageOnlyProfile = getActiveApiProfile(normalizedSettings)
+  if (normalizedSettings.agentApiConfigMode === 'off' && (imageOnlyProfile.provider !== 'openai' || imageOnlyProfile.apiMode === 'images')) {
+    const conversation = state.agentConversations.find((item) => item.id === conversationId)
+    const source = conversation?.rounds.find((item) => item.id === roundId)
+    if (source) await submitImageConversation({ conversationId, sourceRound: source })
+    return
+  }
 
   const agentValidationError = getAgentProfileValidationError(normalizedSettings)
   if (agentValidationError) {
@@ -3682,8 +3705,183 @@ async function executeAgentRound(
   }
 }
 
-async function executeTask(taskId: string) {
-  const { settings } = useStore.getState()
+/** 批量重绘复用现有请求、图片存储和任务历史，不改动主输入框。 */
+export async function submitRedrawTask(options: {
+  batchId: string
+  sourceName: string
+  prompt: string
+  inputImages: InputImage[]
+  params: TaskParams
+  settings: AppSettings
+  onCreated: (taskId: string) => void
+}) {
+  const settings = normalizeSettings(options.settings)
+  const profile = getActiveApiProfile(settings)
+  const error = validateApiProfile(profile)
+  if (error) throw new Error(error)
+  for (const image of options.inputImages) await storeImage(image.dataUrl)
+  const params = normalizeParamsForSettings(options.params, settings, { hasInputImages: true })
+  const transparentMeta = params.transparent_output && profile.transparentBackgroundMethod === 'local'
+    ? createTransparentOutputMeta(options.prompt)
+    : null
+  const task: TaskRecord = {
+    id: genId(),
+    redrawBatchId: options.batchId,
+    sourceName: options.sourceName,
+    prompt: options.prompt,
+    params: { ...params },
+    apiProvider: profile.provider,
+    apiProfileId: profile.id,
+    apiProfileName: profile.name,
+    apiMode: profile.apiMode,
+    apiModel: profile.model,
+    inputImageIds: options.inputImages.map((image) => image.id),
+    outputImages: [],
+    transparentOutput: transparentMeta?.transparentOutput,
+    transparentPrompt: transparentMeta?.effectivePrompt,
+    status: 'running',
+    error: null,
+    createdAt: Date.now(),
+    finishedAt: null,
+    elapsed: null,
+  }
+  await putTask(task)
+  useStore.getState().setTasks([task, ...useStore.getState().tasks])
+  options.onCreated(task.id)
+  batchTaskIds.add(task.id)
+  try {
+    await executeTask(task.id, settings)
+  } finally {
+    batchTaskIds.delete(task.id)
+  }
+  return useStore.getState().tasks.find((item) => item.id === task.id) ?? task
+}
+
+/** 仅 Images 接口也能逐轮改图：主动携带上一轮结果，不依赖文本模型。 */
+async function submitImageConversation(options: { conversationId?: string; sourceRound?: AgentRound } = {}) {
+  const state = useStore.getState()
+  const settings = normalizeSettings(state.settings)
+  const profile = getActiveApiProfile(settings)
+  const configError = validateApiProfile(profile)
+  if (configError) {
+    state.showToast(`请先配置 API：${configError}`, 'error')
+    state.setShowSettings(true, 'api')
+    return
+  }
+  const conversation = options.conversationId
+    ? state.agentConversations.find((item) => item.id === options.conversationId)
+    : getActiveAgentConversation()
+  if (!conversation || conversation.rounds.some((round) => round.status === 'running')) return
+  const editing = options.sourceRound ?? conversation.rounds.find((round) => round.id === state.agentEditingRoundId)
+  const prompt = (options.sourceRound?.prompt ?? state.prompt).trim()
+  if (!prompt) return
+  const path = getActiveAgentRounds(conversation)
+  const parentRoundId = editing ? editing.parentRoundId ?? null : path[path.length - 1]?.id ?? null
+  const parentPath = parentRoundId ? getAgentRoundPath(conversation, parentRoundId) : []
+  const previousRound = parentPath[parentPath.length - 1]
+  const previousOutputs = previousRound?.outputTaskIds.flatMap((id) => state.tasks.find((task) => task.id === id)?.outputImages ?? []) ?? []
+  let imageIds = options.sourceRound?.inputImageIds ?? state.inputImages.map((image) => image.id)
+  if (!imageIds.length && !options.sourceRound) imageIds = uniqueIds(previousOutputs).slice(0, MAX_INPUT_IMAGES)
+  let maskTargetImageId = options.sourceRound?.maskTargetImageId ?? state.maskDraft?.targetImageId ?? null
+  let maskImageId = options.sourceRound?.maskImageId ?? null
+  try {
+    if (!options.sourceRound && state.maskDraft) {
+      const ordered = orderInputImagesForMask(state.inputImages, state.maskDraft.targetImageId)
+      await validateMaskMatchesImage(state.maskDraft.maskDataUrl, ordered[0].dataUrl)
+      imageIds = ordered.map((image) => image.id)
+      maskImageId = await storeImage(state.maskDraft.maskDataUrl, 'mask')
+      cacheImage(maskImageId, state.maskDraft.maskDataUrl)
+    }
+    const now = Date.now()
+    const roundId = genId()
+    const taskId = genId()
+    const userMessageId = genId()
+    const assistantMessageId = genId()
+    const params = normalizeParamsForSettings(state.params, settings, { hasInputImages: imageIds.length > 0 })
+    const task: TaskRecord = {
+      id: taskId,
+      prompt,
+      params,
+      apiProvider: profile.provider,
+      apiProfileId: profile.id,
+      apiProfileName: profile.name,
+      apiMode: profile.apiMode,
+      apiModel: profile.model,
+      sourceMode: 'agent',
+      agentConversationId: conversation.id,
+      agentRoundId: roundId,
+      agentMessageId: assistantMessageId,
+      inputImageIds: imageIds,
+      maskTargetImageId,
+      maskImageId,
+      outputImages: [],
+      status: 'running',
+      error: null,
+      createdAt: now,
+      finishedAt: null,
+      elapsed: null,
+    }
+    await putTask(task)
+    const round: AgentRound = {
+      id: roundId,
+      index: parentPath.length + 1,
+      parentRoundId,
+      userMessageId,
+      assistantMessageId,
+      prompt,
+      inputImageIds: imageIds,
+      maskTargetImageId,
+      maskImageId,
+      outputTaskIds: [taskId],
+      status: 'running',
+      error: null,
+      createdAt: now,
+      finishedAt: null,
+    }
+    updateAgentConversation(conversation.id, (current) => ({
+      ...current,
+      title: current.rounds.length ? current.title : createAgentConversationTitle(prompt, current.title),
+      activeRoundId: roundId,
+      updatedAt: now,
+      rounds: [...current.rounds, round],
+      messages: [
+        ...current.messages,
+        { id: userMessageId, role: 'user', content: prompt, roundId, inputImageIds: imageIds, maskTargetImageId, maskImageId, createdAt: now },
+        { id: assistantMessageId, role: 'assistant', content: '', roundId, outputTaskIds: [taskId], createdAt: now },
+      ],
+    }))
+    state.setTasks([task, ...useStore.getState().tasks])
+    state.setPrompt('')
+    state.clearInputImages()
+    state.clearMaskDraft()
+    state.setAgentEditingRoundId(null)
+    const controller = new AbortController()
+    const key = getAgentRoundControllerKey(conversation.id, roundId)
+    agentRoundControllers.set(key, controller)
+    void executeTask(taskId, settings, controller.signal).then(() => {
+      if (controller.signal.aborted) return
+      const result = useStore.getState().tasks.find((item) => item.id === taskId)
+      updateAgentConversation(conversation.id, (current) => ({
+        ...current,
+        updatedAt: Date.now(),
+        rounds: current.rounds.map((item) => item.id === roundId
+          ? { ...item, status: result?.status === 'done' ? 'done' : 'error', error: result?.error ?? null, finishedAt: Date.now() }
+          : item),
+        messages: current.messages.map((message) => message.id === assistantMessageId
+          ? { ...message, content: result?.status === 'error' ? `请求失败：${result.error}` : '' }
+          : message),
+      }))
+    }).finally(() => {
+      if (agentRoundControllers.get(key) === controller) agentRoundControllers.delete(key)
+    })
+  } catch (err) {
+    console.error('图片会话提交失败', err)
+    state.showToast(err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
+async function executeTask(taskId: string, snapshotSettings?: AppSettings, signal?: AbortSignal) {
+  const settings = snapshotSettings ?? useStore.getState().settings
   const task = useStore.getState().tasks.find((t) => t.id === taskId)
   if (!task) return
   const execution = Symbol(taskId)
@@ -3743,6 +3941,7 @@ async function executeTask(taskId: string) {
       nativeTransparentBackground: task.params.transparent_output && !task.transparentOutput,
       inputImageDataUrls: inputDataUrls,
       maskDataUrl,
+      signal,
       skipCodexCliSizePrompt: task.sourceMode === 'agent',
       onFalRequestEnqueued: (request) => {
         if (taskExecutions.get(taskId) !== execution) return
@@ -4028,6 +4227,8 @@ export async function retryTask(task: TaskRecord) {
     ...(overwrite ? source : {}),
     id: taskId,
     prompt: source.prompt,
+    sourceName: source.sourceName,
+    redrawBatchId: source.redrawBatchId,
     params: taskParams,
     apiProvider: activeProfile.provider,
     apiProfileId: activeProfile.id,
@@ -4087,6 +4288,7 @@ export async function retryTask(task: TaskRecord) {
 
 /** 复用配置 */
 export async function reuseConfig(task: TaskRecord) {
+  if (useStore.getState().appMode === 'batch') useStore.getState().setAppMode('gallery')
   const { settings, setPrompt, setParams, setInputImages, setMaskDraft, clearMaskDraft, showToast, setConfirmDialog, setReusedTaskApiProfile } = useStore.getState()
   const normalizedSettings = normalizeSettings(settings)
   const currentProfile = getActiveApiProfile(settings)
@@ -4163,8 +4365,12 @@ export async function reuseConfig(task: TaskRecord) {
 
 /** 编辑输出：将输出图加入输入 */
 export async function editOutputs(task: TaskRecord) {
-  const { inputImages, addInputImage, showToast } = useStore.getState()
   if (!task.outputImages?.length) return
+  if (useStore.getState().appMode === 'batch') {
+    useStore.getState().setAppMode('agent')
+    useStore.getState().createAgentConversation()
+  }
+  const { inputImages, addInputImage, showToast } = useStore.getState()
 
   let added = 0
   for (const imgId of task.outputImages) {
