@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { createInputImageFromFile, submitRedrawTask, useStore } from '../store'
 import { MAX_INPUT_IMAGES, type InputImage } from '../types'
 import { getActiveApiProfile, validateApiProfile } from '../lib/apiProfiles'
+import { normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { createRedrawSnapshot, getRedrawFileBase, getRedrawInputImages, runRedrawQueue, type RedrawItem } from '../lib/redrawBatch'
 import { useRedrawWorkspace } from '../lib/redrawWorkspace'
 import { ensureImageCached } from '../lib/imageCache'
 import { downloadImageEntriesAsZip, getImageZipEntries } from '../lib/downloadImages'
 import { saveFile } from '../lib/saveFile'
-import { CloseIcon, DownloadIcon, EditIcon, PlusIcon, RefreshIcon } from './icons'
+import { ChevronDownIcon, CloseIcon, DownloadIcon, EditIcon, PlusIcon, RefreshIcon } from './icons'
+import SizePickerModal from './SizePickerModal'
 import { TooltipButton } from './TooltipButton'
 
 function SourceThumb({ item }: { item: RedrawItem }) {
@@ -41,6 +43,7 @@ export default function RedrawWorkspace() {
   const sourceInput = useRef<HTMLInputElement>(null)
   const referenceInput = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  const [showSizePicker, setShowSizePicker] = useState(false)
   const [historyBatchId, setHistoryBatchId] = useState<string | null>(null)
   const batches = [...new Set(tasks.map((task) => task.redrawBatchId).filter((id): id is string => Boolean(id)))]
   const shownBatchId = historyBatchId ?? batch.activeBatchId
@@ -49,6 +52,7 @@ export default function RedrawWorkspace() {
   const failed = batchTasks.filter((task) => task.status === 'error').length
   const running = batchTasks.filter((task) => task.status === 'running').length
   const activeProfile = getActiveApiProfile(settings)
+  const displaySize = normalizeParamsForSettings(params, settings, { hasInputImages: true }).size
   const locked = batch.running || busy
   const retryable = batch.sources.some((item) => {
     const task = tasks.find((task) => task.id === batch.taskIds[item.id])
@@ -205,9 +209,22 @@ export default function RedrawWorkspace() {
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">并发数<input type="number" min={1} max={10} value={batch.concurrency} disabled={locked} className={fieldClass} onChange={(event) => useRedrawWorkspace.setState({ concurrency: Number(event.target.value) })} /></label>
             <label className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">启动间隔 / 秒<input type="number" min={0} max={120} step={0.5} value={batch.intervalSeconds} disabled={locked} className={fieldClass} onChange={(event) => useRedrawWorkspace.setState({ intervalSeconds: Number(event.target.value) })} /></label>
-            <label className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">尺寸<select value={params.size} disabled={locked} className={fieldClass} onChange={(event) => setParams({ size: event.target.value })}>
-              {[...new Set(['auto', '1024x1024', '1024x1536', '1536x1024', params.size])].map((size) => <option key={size} value={size}>{size === 'auto' ? '自动' : size}</option>)}
-            </select></label>
+            <div className="min-w-0 space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <span>尺寸</span>
+              <button
+                type="button"
+                aria-label="设置批量重绘尺寸"
+                aria-haspopup="dialog"
+                aria-expanded={showSizePicker}
+                disabled={locked}
+                className={`${fieldClass} flex items-center justify-between gap-1.5 text-left`}
+                title={displaySize === 'auto' ? '自动' : displaySize}
+                onClick={() => setShowSizePicker(true)}
+              >
+                <span className="min-w-0 truncate">{displaySize === 'auto' ? '自动' : displaySize}</span>
+                <ChevronDownIcon className="h-4 w-4 shrink-0 text-gray-400" />
+              </button>
+            </div>
             <label className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">质量<select value={params.quality} disabled={locked} className={fieldClass} onChange={(event) => setParams({ quality: event.target.value as typeof params.quality })}>
               {['auto', 'low', 'medium', 'high'].map((quality) => <option key={quality}>{quality}</option>)}
             </select></label>
@@ -286,6 +303,14 @@ export default function RedrawWorkspace() {
           </div>)}
         </div>
       </section>
+      {showSizePicker && (
+        <SizePickerModal
+          currentSize={displaySize}
+          onSelect={(size) => setParams({ size })}
+          onClose={() => setShowSizePicker(false)}
+          codexCli={activeProfile.codexCli}
+        />
+      )}
     </main>
   )
 }

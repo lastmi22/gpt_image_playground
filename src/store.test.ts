@@ -143,7 +143,7 @@ import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { clearData, clearFailedTasks, deleteFavoriteCollection, editOutputs, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, restoreExplicitPresetConfig, retryTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
+import { clearData, clearFailedTasks, deleteFavoriteCollection, editOutputs, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, restoreExplicitPresetConfig, retryTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitRedrawTask, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
 const commitTaskDeletionImplementation = vi.mocked(commitTaskDeletion).getMockImplementation()!
 const deleteDbImageImplementation = vi.mocked(deleteDbImage).getMockImplementation()!
@@ -209,6 +209,29 @@ describe('Images conversation', () => {
       parentRoundId: useStore.getState().agentConversations[0].rounds[0].id,
     })
     expect(useStore.getState().tasks).toHaveLength(2)
+  })
+
+  it.each(['auto', '2560x1440'])('uses the same %s size for batch redraw and an image conversation', async (size) => {
+    await putImage({ ...imageA, source: 'upload', createdAt: 1 })
+    vi.mocked(callImageApi).mockResolvedValue({ images: ['data:image/png;base64,output'] })
+    useStore.getState().setParams({ size })
+    const state = useStore.getState()
+    await submitRedrawTask({
+      batchId: 'batch-a',
+      sourceName: 'source.png',
+      prompt: '批量重绘',
+      inputImages: [imageA],
+      params: state.params,
+      settings: state.settings,
+      onCreated: vi.fn(),
+    })
+    useStore.setState({ prompt: '图片会话重绘', inputImages: [imageA] })
+    await submitAgentMessage()
+
+    await vi.waitFor(() => expect(useStore.getState().agentConversations[0].rounds[0].status).toBe('done'))
+    expect(callImageApi).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(callImageApi).mock.calls.map(([options]) => options.params.size)).toEqual([size, size])
+    expect(useStore.getState().tasks.map((task) => task.params.size)).toEqual([size, size])
   })
 
   it('regenerates the original input without consuming an unrelated composer draft or mask', async () => {

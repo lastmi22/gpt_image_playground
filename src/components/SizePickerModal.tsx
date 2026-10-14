@@ -185,6 +185,9 @@ export default function SizePickerModal({ currentSize, onSelect, onClose, allowA
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm animate-overlay-in" />
       <div
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="设置图像尺寸"
         className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/95 p-5 shadow-2xl ring-1 ring-black/5 animate-modal-in dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10"
       >
         <div className="mb-5 flex items-start justify-between gap-4">

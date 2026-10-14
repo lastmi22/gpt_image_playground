@@ -236,7 +236,7 @@ export default function InputParamsPanel({
           className={`flex w-full items-center ${CHIP_CLASS}`}
         >
           {prefix('尺寸')}
-          <span className="font-mono">{displaySize}</span>
+          <span className="font-mono">{displaySize === 'auto' ? '自动' : displaySize}</span>
         </button>
         <ButtonTooltip
           visible={(isFalTextToImage || activeProfile.codexCli) && sizeHint.visible}
