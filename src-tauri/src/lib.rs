@@ -108,7 +108,7 @@ pub fn run() {
             data_dir::log_notice();
             // 安装版由 NSIS 注册协议。开发版只在设置了 GPT_IMAGE_PLAYGROUND_REGISTER_DEEP_LINK 时才注册，
             // 注册会把 HKCU 下的协议改为指向当前开发版程序，覆盖安装版的注册；
-            // 之后需重装正式版，或删除 HKCU\Software\Classes\gpt-image-playground，才能恢复
+            // 之后需重装正式版，或删除 HKCU\Software\Classes\image-redraw，才能恢复
             #[cfg(all(debug_assertions, windows))]
             if std::env::var_os("GPT_IMAGE_PLAYGROUND_REGISTER_DEEP_LINK").is_some() {
                 use tauri_plugin_deep_link::DeepLinkExt;

@@ -1,0 +1,99 @@
+name: Build Personal Windows App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/image-workspace']
+    paths:
+      - '.github/workflows/windows-build.yml'
+      - 'src-tauri/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - run: npm test
+      - name: Build Windows installer
+        env:
+          VITE_BUILTIN_FONT_SOURCE: local
+        run: npm run tauri:build
+      - name: Check desktop startup
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath (Resolve-Path 'src-tauri/target/release/image-redraw.exe') -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 12
+            $app.Refresh()
+            if ($app.HasExited) { throw "Desktop app exited during startup: $($app.ExitCode)" }
+            if (!(Test-Path 'src-tauri/target/release/data/data.db')) { throw 'Desktop app did not initialize its database' }
+            Write-Output "Desktop startup passed: $($app.MainWindowTitle)"
+          } finally {
+            if (!$app.HasExited) {
+              $app.CloseMainWindow() | Out-Null
+              if (!$app.WaitForExit(5000)) { Stop-Process -Id $app.Id }
+            }
+          }
+      - name: Prepare portable app
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'portable' | Out-Null
+          Copy-Item -LiteralPath 'src-tauri/target/release/image-redraw.exe' -Destination 'portable/image-redraw.exe'
+          Copy-Item -LiteralPath 'LICENSE' -Destination 'portable/LICENSE.txt'
+          Copy-Item -LiteralPath 'third-party-licenses' -Destination 'portable/third-party-licenses' -Recurse
+          Compress-Archive -Path 'portable/*' -DestinationPath 'image-redraw-windows-x64-portable.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-redraw-windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            image-redraw-windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  web-footprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web container
+        run: docker build -f deploy/Dockerfile -t image-redraw-web .
+      - name: Measure idle web container
+        shell: bash
+        run: |
+          mkdir -p build-metrics
+          docker run -d --name image-redraw-web -p 127.0.0.1:8080:80 image-redraw-web
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8080/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8080/ >/dev/null
+          {
+            echo 'Idle measurements on a GitHub-hosted Ubuntu runner; not a concurrency benchmark.'
+            echo "Commit: $GITHUB_SHA"
+            docker image inspect --format 'Image bytes: {{.Size}}' image-redraw-web
+            docker exec image-redraw-web sh -c 'du -sk /usr/share/nginx/html'
+            docker stats --no-stream --format 'CPU: {{.CPUPerc}} | Memory: {{.MemUsage}} | Processes: {{.PIDs}}' image-redraw-web
+          } | tee build-metrics/web-footprint.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-redraw-web-footprint
+          path: build-metrics/web-footprint.txt
+          retention-days: 14

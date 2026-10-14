@@ -16,11 +16,11 @@ describe('parseImportLink', () => {
     expect(parseImportLink(settingsLink({ settings: { profiles: [{ name: 'A' }] } }))).not.toBeNull()
   })
 
-  it('识别 deep link', () => {
-    expect(parseImportLink('gpt-image-playground://?apiUrl={address}&apiKey={key}&model={model}')?.get('model')).toBe('{model}')
-    expect(parseImportLink('gpt-image-playground://?apiKey=sk-1')).not.toBeNull()
-    expect(parseImportLink('gpt-image-playground://')).toBeNull()
-    expect(parseImportLink('gpt-image-playground://?foo=bar')).toBeNull()
+  it.each(['image-redraw', 'gpt-image-playground'])('识别 %s 导入协议', (protocol) => {
+    expect(parseImportLink(`${protocol}://?apiUrl={address}&apiKey={key}&model={model}`)?.get('model')).toBe('{model}')
+    expect(parseImportLink(`${protocol}://?apiKey=sk-1`)).not.toBeNull()
+    expect(parseImportLink(`${protocol}://`)).toBeNull()
+    expect(parseImportLink(`${protocol}://?foo=bar`)).toBeNull()
   })
 
   it('普通网址和文本不视为导入链接', () => {
@@ -301,9 +301,9 @@ describe('getProfileImportBaseUrl', () => {
   })
 
   it('客户端未配置网页版地址时改用 deep link', () => {
-    expect(getProfileImportBaseUrl(true, 'http://tauri.localhost/', '')).toBe('gpt-image-playground://')
+    expect(getProfileImportBaseUrl(true, 'http://tauri.localhost/', '')).toBe('image-redraw://')
     const url = createCustomProfileImportUrl(getProfileImportBaseUrl(true, 'http://tauri.localhost/', ''), profile, undefined, options)
-    expect(url.startsWith('gpt-image-playground://?settings=')).toBe(true)
+    expect(url.startsWith('image-redraw://?settings=')).toBe(true)
     expect(parseImportLink(url)).not.toBeNull()
   })
 
